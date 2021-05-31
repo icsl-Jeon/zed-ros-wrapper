@@ -366,6 +366,8 @@ protected:
    */
   void processDetectedObjects(ros::Time t);
 
+  void hollow_out_depth();
+
   /*! \brief Generates an univoque color for each object class ID
    */
   inline sl::float3 generateColorClass(int idx)
@@ -417,6 +419,8 @@ private:
   image_transport::CameraPublisher mPubRightGray;
   image_transport::CameraPublisher mPubRawRightGray;
 
+  ros::Publisher mPubDepthMaskedRemoved; // mask of objects
+  ros::Publisher mPubRgbMasked;
   ros::Publisher mPubConfMap;    //
   ros::Publisher mPubDisparity;  //
   ros::Publisher mPubCloud;
@@ -697,6 +701,13 @@ private:
   bool mObjDetFruitsEnable = true;
 
   sl::DETECTION_MODEL mObjDetModel = sl::DETECTION_MODEL::MULTI_CLASS_BOX;
+  sl::Mat mDepthMat;
+  sl::Mat mRgbMat;
+  int mMaskInflation;
+  bool mDepthMatReceived = false;
+  bool mRgbMatReceived = false;
+  vector<sl::uint2> objectPixels; // this will hollow out depth images
+
 
   ros::Publisher mPubObjDet;
 };  // class ZEDROSWrapperNodelet

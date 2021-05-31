@@ -144,6 +144,13 @@ void ZEDWrapperNodelet::onInit()
   string conf_map_topic_name = "confidence_map";
   string conf_map_topic = confImgRoot + "/" + conf_map_topic_name;
 
+  std::string maskImgRoot = "obj_det";
+  string mask_topic_name = "depth_masked";
+  string mask_topic = maskImgRoot + "/" + mask_topic_name ;
+
+  string mask_topic_rgb = maskImgRoot + "/" + "rgb_masked";
+
+
   // Set the positional tracking topic names
   std::string poseTopic = "pose";
   string pose_cov_topic;
@@ -460,6 +467,13 @@ void ZEDWrapperNodelet::onInit()
   mPubConfMap = mNhNs.advertise<sensor_msgs::Image>(conf_map_topic, 1);  // confidence map
   NODELET_INFO_STREAM("Advertised on topic " << mPubConfMap.getTopic());
 
+  // Mask publisher
+  mPubDepthMaskedRemoved = mNhNs.advertise<sensor_msgs::Image>(mask_topic, 1);  // confidence map
+  NODELET_INFO_STREAM("Advertised on topic " << mPubDepthMaskedRemoved.getTopic());
+
+  mPubRgbMasked = mNhNs.advertise<sensor_msgs::Image>(mask_topic_rgb, 1);  // confidence map
+  NODELET_INFO_STREAM("Advertised on topic " <<mPubRgbMasked.getTopic());
+
   // Disparity publisher
   mPubDisparity = mNhNs.advertise<stereo_msgs::DisparityImage>(disparityTopic, static_cast<int>(mVideoDepthFreq));
   NODELET_INFO_STREAM("Advertised on topic " << mPubDisparity.getTopic());
@@ -775,6 +789,7 @@ void ZEDWrapperNodelet::readParameters()
 
   // ----> Object Detection
   mNhNs.param<bool>("object_detection/od_enabled", mObjDetEnabled, false);
+  mNhNs.param<int>("object_detection/mask_pixel_thickness",mMaskInflation,10);
 
   if (mObjDetEnabled)
   {
@@ -1491,7 +1506,7 @@ bool ZEDWrapperNodelet::start_obj_detect()
   NODELET_INFO_STREAM("*** Starting Object Detection ***");
 
   sl::ObjectDetectionParameters od_p;
-  od_p.enable_mask_output = false;
+  od_p.enable_mask_output = true; // JBS
   od_p.enable_tracking = mObjDetTracking;
   od_p.image_sync = false;  // Asynchronous object detection
   od_p.detection_model = mObjDetModel;
@@ -2569,8 +2584,13 @@ void ZEDWrapperNodelet::callback_pubVideoDepth(const ros::TimerEvent& e)
   {
     mZed.retrieveImage(mat_left, sl::VIEW::LEFT, sl::MEM::CPU, mMatResolVideo);
     retrieved = true;
+
     ts_rgb = mat_left.timestamp;
     grab_ts = mat_left.timestamp;
+
+    mRgbMat = mat_left;
+    mRgbMatReceived = true;
+
   }
   if (rgbRawSubnumber + leftRawSubnumber + stereoRawSubNumber > 0)
   {
@@ -2629,6 +2649,8 @@ void ZEDWrapperNodelet::callback_pubVideoDepth(const ros::TimerEvent& e)
     }
 #endif
     retrieved = true;
+    mDepthMat = mat_depth;
+    mDepthMatReceived = true;
     grab_ts = mat_depth.timestamp;
 
     ts_depth = mat_depth.timestamp;
@@ -3742,6 +3764,9 @@ void ZEDWrapperNodelet::device_poll_thread_func()
       }
       mObjDetMutex.unlock();
 
+
+
+
       // Publish the odometry if someone has subscribed to
       if (computeTracking)
       {
@@ -4639,6 +4664,8 @@ void ZEDWrapperNodelet::processDetectedObjects(ros::Time t)
   objMsg->objects.resize(objCount);
 
   size_t idx = 0;
+  vector<sl::Mat> objMaskSet;
+
   for (auto data : objects.object_list)
   {
     objMsg->objects[idx].label = sl::toString(data.label).c_str();
@@ -4654,6 +4681,8 @@ void ZEDWrapperNodelet::processDetectedObjects(ros::Time t)
     objMsg->objects[idx].tracking_state = static_cast<int8_t>(data.tracking_state);
     //NODELET_INFO_STREAM( "[" << idx << "] Tracking: " << sl::toString(static_cast<sl::OBJECT_TRACKING_STATE>(data.tracking_state)));
     objMsg->objects[idx].action_state = static_cast<int8_t>(data.action_state);
+
+    objMaskSet.push_back(data.mask);
 
     if (data.bounding_box_2d.size() == 4)
     {
@@ -4700,6 +4729,82 @@ void ZEDWrapperNodelet::processDetectedObjects(ros::Time t)
     // at the end of the loop
     idx++;
   }
+
+      // publish masked depth image
+      objectPixels.clear();
+      uint32_t maskSubNumber =mPubDepthMaskedRemoved.getNumSubscribers();
+      if ( maskSubNumber > 0){
+          if (objCount > 0 and mDepthMatReceived) {
+              sl::Mat maskDepthMat = mDepthMat;
+              int Wtotal = maskDepthMat.getWidth();
+              int Htotal = maskDepthMat.getHeight();
+
+              for (int cnt = 0; cnt < objCount; cnt++) {
+                  sl::uint2 maskOrigin = objects.object_list[cnt].bounding_box_2d[0];
+                  int W = objMaskSet[cnt].getWidth();
+                  int H = objMaskSet[cnt].getHeight();
+
+                  for (int c = 0; c < W; c++)
+                      for (int r = 0; r < H; r++) {
+                          sl::uchar1 pixelVal;
+                          objMaskSet[cnt].getValue(c, r, &pixelVal);
+                          if (pixelVal > 0) {
+                              auto targetPixel = maskOrigin + sl::uint2(c, r);
+                              float dZero = 0.0;
+                              float nanVal = 0.1 / dZero;
+                              for (int rr = -mMaskInflation; rr < mMaskInflation; rr++)
+                                  for (int cc = -mMaskInflation; cc < mMaskInflation; cc++) {
+                                      int x = targetPixel.x + cc;
+                                      int y = targetPixel.y + rr;
+                                      if (x >= 0 and x < Wtotal and y >= 0 and y < Htotal)
+                                          maskDepthMat.setValue(x, y, nanVal);
+                                  }
+                              objectPixels.push_back(targetPixel);
+                          }
+                      }
+                  }
+              sensor_msgs::ImagePtr  maskMsg = boost::make_shared<sensor_msgs::Image>();
+              sl_tools::imageToROSmsg(maskMsg, maskDepthMat, mDepthFrameId, objMsg->header.stamp);
+              mPubDepthMaskedRemoved.publish(maskMsg);
+          }
+
+          if (objCount > 0 and mRgbMatReceived){
+              float alpha = 0.5;
+              sl::Mat maskRgbMat = mRgbMat;
+              int Wtotal =maskRgbMat.getWidth();
+              int Htotal = maskRgbMat.getHeight();
+
+              for (int cnt = 0; cnt < objCount; cnt++) {
+                  sl::uint2 maskOrigin = objects.object_list[cnt].bounding_box_2d[0];
+                  int W = objMaskSet[cnt].getWidth();
+                  int H = objMaskSet[cnt].getHeight();
+
+                  for (int c = 0; c < W; c++)
+                      for (int r = 0; r < H; r++) {
+                          sl::uchar1 pixelVal;
+                          objMaskSet[cnt].getValue(c, r, &pixelVal);
+                          if (pixelVal > 0) {
+                              auto targetPixel = maskOrigin + sl::uint2(c, r);
+                              int x = targetPixel.x ;
+                              int y = targetPixel.y ;
+                              sl::uint3 rgb;
+                              rgb =  sl::uint3 (255,0,0);
+                              maskRgbMat.setValue(x, y,rgb);
+                          }
+                      }
+              }
+
+
+              sensor_msgs::ImagePtr  maskRgbMsg = boost::make_shared<sensor_msgs::Image>();
+              sl_tools::imageToROSmsg(maskRgbMsg, maskRgbMat,mRgbFrameId, objMsg->header.stamp);
+              mPubRgbMasked.publish(maskRgbMsg);
+
+          }
+      }
+
+
+
+
 
   mPubObjDet.publish(objMsg);
 }
