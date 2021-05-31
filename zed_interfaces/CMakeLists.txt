@@ -27,6 +27,7 @@ add_message_files(
     Skeleton2D.msg
     Skeleton3D.msg
     RGBDSensors.msg
+    MaskPoint2D.msg
   )
 
 #add_action_files(DIRECTORY action FILES act.action)

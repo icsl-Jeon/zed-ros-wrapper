@@ -4,7 +4,7 @@ project(zed_nodelets)
 
 # if CMAKE_BUILD_TYPE is not specified, take 'Release' as default
 IF(NOT CMAKE_BUILD_TYPE)
-    SET(CMAKE_BUILD_TYPE debug)
+    SET(CMAKE_BUILD_TYPE release)
 ENDIF(NOT CMAKE_BUILD_TYPE)
 
 function(checkPackage package customMessage)

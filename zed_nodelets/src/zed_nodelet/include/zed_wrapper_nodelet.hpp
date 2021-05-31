@@ -54,6 +54,7 @@
 #include <zed_interfaces/stop_remote_stream.h>
 #include <zed_interfaces/stop_svo_recording.h>
 #include <zed_interfaces/toggle_led.h>
+#include <zed_interfaces/MaskPoint2D.h>
 
 // Topics
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
@@ -409,6 +410,7 @@ private:
   image_transport::CameraPublisher mPubRight;     //
   image_transport::CameraPublisher mPubRawRight;  //
   image_transport::CameraPublisher mPubDepth;     //
+
   image_transport::Publisher mPubStereo;
   image_transport::Publisher mPubRawStereo;
 
@@ -419,8 +421,6 @@ private:
   image_transport::CameraPublisher mPubRightGray;
   image_transport::CameraPublisher mPubRawRightGray;
 
-  ros::Publisher mPubDepthMaskedRemoved; // mask of objects
-  ros::Publisher mPubRgbMasked;
   ros::Publisher mPubConfMap;    //
   ros::Publisher mPubDisparity;  //
   ros::Publisher mPubCloud;
@@ -439,6 +439,7 @@ private:
   ros::Publisher mPubTempL;
   ros::Publisher mPubTempR;
   ros::Publisher mPubCamImuTransf;
+  ros::Publisher mPubMaskPoint; 
 
   // Timers
   ros::Timer mImuTimer;
